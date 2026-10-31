@@ -13,7 +13,7 @@ Producción: https://comisionjorcas2027.vercel.app (cada push a `main` despliega
 | React / React DOM | 19.3.1 |
 | @supabase/supabase-js | 2.118.0 (solo servidor) |
 | TypeScript | 5.9.3 |
-| Node.js | ≥ 22 (lo exige supabase-js) |
+| Node.js | 24.x (fijado en `engines`; supabase-js exige ≥ 22) |
 
 Sin librerías de UI: CSS propio en `app/globals.css`.
 
