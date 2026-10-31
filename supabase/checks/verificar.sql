@@ -19,6 +19,9 @@ select f.funcion, r.rolname,
        has_function_privilege(r.rolname, f.firma, 'execute') as puede_ejecutar
   from pg_roles r
  cross join (values ('registrar_votos',    'public.registrar_votos(uuid, text, jsonb)'),
-                    ('invitado_por_token', 'public.invitado_por_token(uuid, text)')) as f(funcion, firma)
+                    ('invitado_por_token', 'public.invitado_por_token(uuid, text)'),
+                    ('admin_crear_encuesta',    'public.admin_crear_encuesta(text, text, timestamptz, jsonb, jsonb)'),
+                    ('admin_cerrar_encuesta',   'public.admin_cerrar_encuesta(uuid)'),
+                    ('admin_convocar_encuesta', 'public.admin_convocar_encuesta(uuid, uuid, text)')) as f(funcion, firma)
  where r.rolname in ('anon', 'authenticated', 'service_role', 'postgres')
  order by 1, 2;
