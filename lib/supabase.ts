@@ -48,6 +48,15 @@ export function getSupabase(): SupabaseClient {
     throw new ConfigError(msg);
   }
 
+  // Con una clave publishable/anon, RLS devuelve 0 filas sin error y todo
+  // parecería "Enlace no válido". Mejor fallar con un mensaje claro.
+  if (!esClaveDeServidor(key!)) {
+    const msg =
+      "[config] SUPABASE_SERVICE_ROLE_KEY no es una clave de servidor: usa la secret key (sb_secret_...) o la service_role legacy, no la publishable/anon";
+    console.error(msg);
+    throw new ConfigError(msg);
+  }
+
   cliente = createClient(url!, key!, {
     auth: {
       persistSession: false,
@@ -60,4 +69,18 @@ export function getSupabase(): SupabaseClient {
     },
   });
   return cliente;
+}
+
+/** true para sb_secret_... o para un JWT legacy con role = service_role. Nunca registra la clave. */
+function esClaveDeServidor(key: string): boolean {
+  if (key.startsWith("sb_secret_")) return true;
+  if (key.startsWith("sb_")) return false; // sb_publishable_, sb_temp_, etc.
+  const partes = key.split(".");
+  if (partes.length !== 3) return false;
+  try {
+    const payload = JSON.parse(Buffer.from(partes[1], "base64url").toString("utf8")) as { role?: unknown };
+    return payload.role === "service_role";
+  } catch {
+    return false;
+  }
 }
