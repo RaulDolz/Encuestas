@@ -36,6 +36,7 @@ con `import "server-only"`. Si falta alguna variable, el log del servidor muestr
 |---|---|
 | `supabase/migrations/0001_esquema.sql` | Crea `encuestas`, `opciones`, `invitados`, `votos` con RLS activo y sin políticas. **Solo crea las tablas que no existen**: si el artifact de actas ya las creó, no toca nada (ni columnas ni RLS). |
 | `supabase/migrations/0002_registrar_votos.sql` | Función `registrar_votos(p_encuesta, p_token, p_votos)`: `security definer`, ejecutable solo por `service_role`. |
+| `supabase/migrations/0003_invitado_por_token.sql` | Función `invitado_por_token(p_encuesta, p_token)` → `(id, nombre)`: `security definer`, solo `service_role`. La app busca al invitado por RPC (POST) para que el token no aparezca en la URL ni en los logs del gateway de Supabase. |
 | `supabase/checks/verificar.sql` | Solo lectura: estado de RLS, políticas y permisos de la función. |
 
 ### Aplicarlas en Supabase (SQL Editor)
@@ -43,12 +44,13 @@ con `import "server-only"`. Si falta alguna variable, el log del servidor muestr
 1. Supabase → proyecto `mtszpwcyugljmmyyqhqo` → **SQL Editor** → **New query**.
 2. Pega el contenido de `0001_esquema.sql` → **Run**.
 3. Nueva query con `0002_registrar_votos.sql` → **Run**.
-4. Nueva query con `supabase/checks/verificar.sql` → **Run**. Esperado:
+4. Nueva query con `0003_invitado_por_token.sql` → **Run**.
+5. Nueva query con `supabase/checks/verificar.sql` → **Run**. Esperado:
    - `rls = true` en las 4 tablas.
    - Ninguna política para `anon`/`authenticated`.
-   - `registrar_votos`: `anon` y `authenticated` = `false`, `service_role` = `true`.
+   - `registrar_votos` e `invitado_por_token`: `anon` y `authenticated` = `false`, `service_role` = `true`.
 
-Ambas migraciones son re-ejecutables.
+Todas las migraciones son re-ejecutables.
 
 ### Errores de `registrar_votos`
 
@@ -85,6 +87,8 @@ El rewrite de `/e/<id>?t=` está en `next.config.ts` (`beforeFiles`, condicionad
   `X-Frame-Options: DENY`. `/e/*` con `Cache-Control: private, no-store`.
 - Las consultas nunca seleccionan `email` ni `token` de nadie; la tabla muestra `nombre`
   o "Participante N".
+- El token solo viaja en el body de las RPC (`invitado_por_token`, `registrar_votos`), nunca en
+  query strings hacia Supabase, así que no queda en los logs del gateway.
 - `POST /e/<id>/votar`: exige `Content-Type: application/json`, rechaza `Origin`/`Sec-Fetch-Site`
   de otro origen, limita el body a 32 KB y valida uuids, booleanos y duplicados antes de la RPC
   (que vuelve a validarlo todo en la BD).

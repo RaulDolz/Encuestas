@@ -14,9 +14,11 @@ select tablename, policyname, roles, cmd
  where schemaname = 'public'
    and tablename in ('encuestas', 'opciones', 'invitados', 'votos');
 
--- 3) Quién puede ejecutar registrar_votos (lo esperado: solo service_role y el owner).
-select r.rolname,
-       has_function_privilege(r.rolname, 'public.registrar_votos(uuid, text, jsonb)', 'execute') as puede_ejecutar
+-- 3) Quién puede ejecutar las funciones (lo esperado: solo service_role y el owner).
+select f.funcion, r.rolname,
+       has_function_privilege(r.rolname, f.firma, 'execute') as puede_ejecutar
   from pg_roles r
+ cross join (values ('registrar_votos',    'public.registrar_votos(uuid, text, jsonb)'),
+                    ('invitado_por_token', 'public.invitado_por_token(uuid, text)')) as f(funcion, firma)
  where r.rolname in ('anon', 'authenticated', 'service_role', 'postgres')
- order by 1;
+ order by 1, 2;

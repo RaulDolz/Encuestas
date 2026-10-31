@@ -41,17 +41,17 @@ type Invitado = { id: string; nombre: string | null };
 /** Devuelve el invitado si el token pertenece a la encuesta; null en cualquier otro caso. */
 export async function invitadoPorToken(encuestaId: string, token: string): Promise<Invitado | null> {
   if (!esUuid(encuestaId) || !esToken(token)) return null;
-  const { data, error } = await getSupabase()
-    .from("invitados")
-    .select("id, nombre")
-    .eq("encuesta_id", encuestaId)
-    .eq("token", token)
-    .maybeSingle();
+  // RPC (POST): el token va en el body, no en la URL que registra el gateway de Supabase.
+  const { data, error } = await getSupabase().rpc("invitado_por_token", {
+    p_encuesta: encuestaId,
+    p_token: token,
+  });
   if (error) {
     console.error("[encuestas] error buscando invitado", { code: error.code });
     throw new Error("consulta_fallida");
   }
-  return data ?? null;
+  const fila = Array.isArray(data) ? (data[0] as Invitado | undefined) : undefined;
+  return fila ? { id: fila.id, nombre: fila.nombre ?? null } : null;
 }
 
 /**
