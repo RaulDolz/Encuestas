@@ -1,11 +1,11 @@
-// Migraciones 0001-0004 contra Postgres real (PGlite, en memoria). No toca Supabase.
+// Migraciones 0001-0005 contra Postgres real (PGlite, en memoria). No toca Supabase.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 
-const MIG = ["0001_esquema.sql", "0002_registrar_votos.sql", "0003_invitado_por_token.sql", "0004_admin.sql"];
+const MIG = ["0001_esquema.sql", "0002_registrar_votos.sql", "0003_invitado_por_token.sql", "0004_admin.sql", "0005_enlace_comun.sql"];
 const sql = (f: string) => readFileSync(new URL(`../supabase/migrations/${f}`, import.meta.url), "utf8");
 
 let db: PGlite;
@@ -188,4 +188,64 @@ test("convocar: exige cerrada y opción de la misma encuesta", async () => {
   );
   assert.equal(r2.rows[0].ganadora_opcion_id, a.opciones[0].id);
   assert.equal(r2.rows[0].evento_outlook_id, null);
+});
+
+// ---------------------------------------------------------------------------
+// 0005: enlace común
+// ---------------------------------------------------------------------------
+test("0005 es re-ejecutable y sus funciones solo las ejecuta service_role", async () => {
+  await db.exec(sql("0005_enlace_comun.sql"));
+  const r = await db.query<{ f: string; anon: boolean; auth: boolean; sr: boolean }>(`
+    select p.proname f,
+           has_function_privilege('anon', p.oid, 'execute') anon,
+           has_function_privilege('authenticated', p.oid, 'execute') auth,
+           has_function_privilege('service_role', p.oid, 'execute') sr
+      from pg_proc p where p.proname in ('clave_nombre','token_de_invitado','alta_invitado_comun') order by 1`);
+  assert.equal(r.rows.length, 3);
+  for (const row of r.rows) assert.deepEqual([row.anon, row.auth, row.sr], [false, false, true], row.f);
+});
+
+test("token_de_invitado: solo si el invitado es de esa encuesta", async () => {
+  const a = await crear({});
+  const b = await crear({});
+  const t = await db.query<{ t: string | null }>(`select public.token_de_invitado($1, $2) t`, [a.id, a.invitados[0].id]);
+  assert.equal(t.rows[0].t, a.invitados[0].token);
+  const x = await db.query<{ t: string | null }>(`select public.token_de_invitado($1, $2) t`, [b.id, a.invitados[0].id]);
+  assert.equal(x.rows[0].t, null);
+});
+
+test("alta_invitado_comun: alta, nombre repetido, límites y votación cerrada", async () => {
+  const e = await crear({ invitados: [{ email: "ana@example.com", nombre: "José Pérez" }] });
+  const alta = (nombre: string, id = e.id) =>
+    db.query<{ id: string; token: string }>(`select * from public.alta_invitado_comun($1, $2)`, [id, nombre]);
+
+  const r = await alta("  María   López ");
+  assert.equal(r.rows.length, 1);
+  assert.match(r.rows[0].token, /^[0-9a-f]{48}$/);
+  const fila = (await db.query<{ nombre: string; email: string }>(`select nombre, email from invitados where id=$1`, [r.rows[0].id])).rows[0];
+  assert.equal(fila.nombre, "María López");
+  assert.match(fila.email, /^sin-email-[0-9a-f]{16}@jorcas\.invalid$/);
+
+  // El nuevo invitado puede votar con registrar_votos (misma ruta pública).
+  await db.query(`select registrar_votos($1,$2,$3::jsonb)`, [e.id, r.rows[0].token, JSON.stringify([{ opcion_id: e.opciones[0].id, disponible: true }])]);
+
+  assert.equal(await errorDe(alta("jose  PEREZ")), "nombre_repetido");
+  assert.equal(await errorDe(alta("maria lopez")), "nombre_repetido");
+  assert.equal(await errorDe(alta("   ")), "nombre_invalido");
+  assert.equal(await errorDe(alta("x".repeat(101))), "nombre_invalido");
+  assert.equal(await errorDe(alta("Nadie", "00000000-0000-0000-0000-000000000000")), "encuesta_no_encontrada");
+
+  await db.query(`select public.admin_cerrar_encuesta($1)`, [e.id]);
+  assert.equal(await errorDe(alta("Otra persona")), "encuesta_cerrada");
+});
+
+test("alta_invitado_comun: máximo 200 invitados", async () => {
+  const invs = Array.from({ length: 200 }, (_, i) => ({ email: `p${i}@example.com`, nombre: `P${i}` }));
+  const e = await crear({ invitados: invs });
+  assert.equal(await errorDe(db.query(`select * from public.alta_invitado_comun($1, 'Uno más')`, [e.id])), "demasiados_invitados");
+});
+
+test("el email ficticio pasa la validación de admin_crear_encuesta", async () => {
+  const e = await crear({ invitados: [{ email: "sin-email-0123456789abcdef@jorcas.invalid", nombre: "Sin email" }] });
+  assert.equal(e.invitados[0].email, "sin-email-0123456789abcdef@jorcas.invalid");
 });

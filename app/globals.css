@@ -417,6 +417,148 @@ tfoot td.max {
   }
 }
 
+/* ---- Enlace común: elegir nombre / añadirse ---- */
+.entrada {
+  padding-bottom: 48px;
+}
+
+.aviso-error {
+  background: var(--no-fondo);
+  color: var(--no);
+  border: 1px solid color-mix(in srgb, var(--no) 40%, transparent);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-weight: 600;
+}
+
+.quien {
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  padding: 16px;
+  margin-bottom: 24px;
+  box-shadow: var(--sombra);
+}
+
+.quien h2 {
+  margin-bottom: 12px;
+}
+
+.continuar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--borde);
+}
+
+a.btn-guardar {
+  text-decoration: none;
+  padding: 0 20px;
+}
+
+.lista-nombres {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.btn-nombre,
+.btn-secundario {
+  appearance: none;
+  border: 1.5px solid var(--borde);
+  background: transparent;
+  color: var(--texto);
+  font: inherit;
+  font-weight: 600;
+  min-height: 48px;
+  border-radius: 10px;
+  cursor: pointer;
+  padding: 6px 12px;
+}
+
+.btn-nombre {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.btn-nombre:hover,
+.btn-secundario:hover {
+  border-color: var(--acento-2);
+}
+
+.btn-nombre:focus-visible,
+.btn-secundario:focus-visible,
+.alta input:focus-visible,
+a.btn-guardar:focus-visible {
+  outline: 3px solid var(--acento-2);
+  outline-offset: 2px;
+}
+
+.marca-voto {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--si);
+}
+
+.alta {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.alta label {
+  font-size: 0.95rem;
+  color: var(--tenue);
+}
+
+.alta-fila {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.alta input {
+  flex: 1 1 200px;
+  min-width: 0;
+  min-height: 48px;
+  border: 1.5px solid var(--borde);
+  border-radius: 10px;
+  background: var(--fondo);
+  color: var(--texto);
+  font: inherit;
+  padding: 0 12px;
+}
+
+.btn-secundario {
+  flex: 0 0 auto;
+}
+
+.resultados h2 {
+  margin-bottom: 12px;
+}
+
+.quienes {
+  font-size: 0.9rem;
+  color: var(--tenue);
+}
+
+.cambiar {
+  font-size: 0.9rem;
+  margin-top: 4px;
+}
+
+.cambiar a {
+  color: var(--acento);
+}
+
 /* ---- Escritorio ---- */
 @media (min-width: 900px) {
   .contenedor {

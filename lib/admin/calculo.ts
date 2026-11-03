@@ -1,4 +1,5 @@
 // Cálculo puro del detalle de una encuesta (sin acceso a BD): recuentos, matriz y líder.
+import { enlaceComun, esEmailFicticio } from "../comun-codigo.ts";
 
 export type FilaEncuesta = {
   id: string;
@@ -57,7 +58,8 @@ export function calcularDetalle(
       return {
         id: i.id,
         nombre: i.nombre,
-        email: i.email,
+        /** null si se dio de alta sin email (en la BD hay uno ficticio). */
+        email: esEmailFicticio(i.email) ? null : i.email,
         enlace: enlaceVoto(base, enc.id, i.token),
         enviado_at: i.enviado_at,
         respondio_at: i.respondio_at,
@@ -81,6 +83,8 @@ export function calcularDetalle(
     creada_at: enc.creada_at,
     ganadora_opcion_id: enc.ganadora_opcion_id,
     evento_outlook_id: enc.evento_outlook_id,
+    /** Enlace único para todos: cada uno elige su nombre o se añade. null si falta ADMIN_API_KEY. */
+    enlace_comun: enlaceComun(base, enc.id),
     opciones: opc,
     invitados: inv,
     total_invitados: inv.length,

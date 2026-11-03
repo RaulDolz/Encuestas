@@ -15,7 +15,7 @@ const horaAhora = () =>
     new Date(),
   );
 
-export default function Votacion({ vista }: { vista: VistaEncuesta }) {
+export default function Votacion({ vista, enlaceCambiar }: { vista: VistaEncuesta; enlaceCambiar?: string | null }) {
   const router = useRouter();
   const [seleccion, setSeleccion] = useState<Record<string, boolean>>(() => ({ ...vista.misVotos }));
   const [estado, setEstado] = useState<Estado>({ tipo: "inicial" });
@@ -68,7 +68,7 @@ export default function Votacion({ vista }: { vista: VistaEncuesta }) {
         return;
       }
       if (res.status === 403) {
-        setEstado({ tipo: "error", texto: "Tu enlace ya no es válido. Vuelve a abrirlo desde el correo." });
+        setEstado({ tipo: "error", texto: "Tu enlace ya no es válido. Vuelve a abrir el enlace de la encuesta." });
         return;
       }
       setEstado({ tipo: "error", texto: "No se ha podido guardar. Inténtalo de nuevo." });
@@ -82,6 +82,11 @@ export default function Votacion({ vista }: { vista: VistaEncuesta }) {
       <header className="cabecera">
         <p className="marca">Comisión de Fiestas de Jorcas 2027</p>
         {vista.nombre ? <p className="saludo">Hola, {vista.nombre}</p> : null}
+        {enlaceCambiar ? (
+          <p className="cambiar">
+            <a href={enlaceCambiar}>{vista.nombre ? `¿No eres ${vista.nombre}? ` : ""}Cambiar de persona · ver la lista</a>
+          </p>
+        ) : null}
         <h1>{vista.titulo}</h1>
         {vista.descripcion ? <p className="descripcion">{vista.descripcion}</p> : null}
         <p className="cierre">

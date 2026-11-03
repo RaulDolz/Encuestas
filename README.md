@@ -1,7 +1,9 @@
 # Encuestas de fecha · Comisión de Fiestas de Jorcas 2027
 
-Web de votación de fechas tipo Doodle. Cada invitado entra con un enlace personal
-(`/e/<id>?t=<token>`), marca qué fechas le van bien y puede cambiarlo hasta el cierre.
+Web de votación de fechas tipo Doodle. Se reparte **un enlace común por encuesta**
+(`/e/<id>?c=<código>`): quien lo abre ve los resultados, elige su nombre en la lista (o se
+añade escribiéndolo), marca qué fechas le van bien y puede cambiarlo hasta el cierre.
+Los enlaces personales (`/e/<id>?t=<token>`) siguen funcionando. La web nunca envía correos.
 
 Producción: https://comisionjorcas2027.vercel.app (cada push a `main` despliega).
 
@@ -41,6 +43,7 @@ con `import "server-only"`. Si falta alguna variable, el log del servidor muestr
 | `supabase/migrations/0002_registrar_votos.sql` | Función `registrar_votos(p_encuesta, p_token, p_votos)`: `security definer`, ejecutable solo por `service_role`. |
 | `supabase/migrations/0003_invitado_por_token.sql` | Función `invitado_por_token(p_encuesta, p_token)` → `(id, nombre)`: `security definer`, solo `service_role`. La app busca al invitado por RPC (POST) para que el token no aparezca en la URL ni en los logs del gateway de Supabase. |
 | `supabase/migrations/0004_admin.sql` | Funciones de administración para el conector MCP: `admin_crear_encuesta` (encuesta + opciones + invitados en una transacción), `admin_cerrar_encuesta`, `admin_convocar_encuesta`. `security definer`, solo `service_role`. No cambia ninguna tabla. |
+| `supabase/migrations/0005_enlace_comun.sql` | Enlace común: `token_de_invitado` (token de un invitado de esa encuesta), `alta_invitado_comun` (alta por nombre con email ficticio `sin-email-<hex>@jorcas.invalid`; solo con la votación abierta, máx. 200, sin nombres repetidos) y `clave_nombre` (comparación sin tildes ni mayúsculas, conserva la ñ). `security definer`, solo `service_role`. No cambia ninguna tabla. |
 | `supabase/checks/verificar.sql` | Solo lectura: estado de RLS, políticas y permisos de la función. |
 
 ### Aplicarlas en Supabase (SQL Editor)
@@ -50,10 +53,11 @@ con `import "server-only"`. Si falta alguna variable, el log del servidor muestr
 3. Nueva query con `0002_registrar_votos.sql` → **Run**.
 4. Nueva query con `0003_invitado_por_token.sql` → **Run**.
 5. Nueva query con `0004_admin.sql` → **Run**.
-6. Nueva query con `supabase/checks/verificar.sql` → **Run**. Esperado:
+6. Nueva query con `0005_enlace_comun.sql` → **Run**.
+7. Nueva query con `supabase/checks/verificar.sql` → **Run**. Esperado:
    - `rls = true` en las 4 tablas.
    - Ninguna política para `anon`/`authenticated`.
-   - `registrar_votos`, `invitado_por_token` y las tres `admin_*`: `anon` y `authenticated` = `false`, `service_role` = `true`.
+   - `registrar_votos`, `invitado_por_token`, las tres `admin_*`, `clave_nombre`, `token_de_invitado` y `alta_invitado_comun`: `anon` y `authenticated` = `false`, `service_role` = `true`.
 
 Todas las migraciones son re-ejecutables.
 
@@ -74,6 +78,8 @@ SQLSTATE `P0001`; el mensaje es el código. La API los traduce así:
 | Ruta | Tipo | Comportamiento |
 |---|---|---|
 | `/` | estática | Página neutra, no lista encuestas. |
+| `/e/<id>?c=<código>` | rewrite → `app/e/[id]/comun/page.tsx` | **Enlace común.** Comprueba el código; muestra la lista de nombres, el alta («¿No estás en la lista?») y los resultados (recuento por fecha, quién puede y tabla) sin identificarse. Si el dispositivo ya tiene cookie, ofrece «Continuar como X». Código inválido → "Enlace no válido". |
+| `POST /e/<id>/entrar` | Route Handler | Formulario de la página anterior (`c` + `invitado` o `nombre`). Exige mismo origen. Fija la misma cookie `jorcas_t` que el enlace personal y `jorcas_c` (para «Cambiar de persona») y redirige (303) a `/e/<id>`. Errores de negocio → vuelve a `/e/<id>?c=…&error=<código>`. |
 | `/e/<id>?t=<token>` | rewrite → `app/e/[id]/acceso/route.ts` | Valida el token, lo guarda en cookie `jorcas_t` (httpOnly, Secure, SameSite=Lax, Path=`/e/<id>`) y redirige (303) a `/e/<id>`. Token inválido → `/enlace-no-valido`. |
 | `/e/<id>` | dinámica | Página de votación. Sin cookie válida → "Enlace no válido". |
 | `POST /e/<id>/votar` | Route Handler | Lee el token **solo** de la cookie y llama a `registrar_votos`. |
@@ -83,7 +89,16 @@ SQLSTATE `P0001`; el mensaje es el código. La API los traduce así:
 > navegador no la enviaría a `/api/votar`. Mover la API bajo `/e/<id>` mantiene la cookie
 > limitada a su encuesta y el token fuera del body.
 
-El rewrite de `/e/<id>?t=` está en `next.config.ts` (`beforeFiles`, condicionado a que exista `t`).
+Los rewrites de `/e/<id>?t=` y `/e/<id>?c=` están en `next.config.ts` (`beforeFiles`; si vienen los dos, gana `t`).
+
+### El enlace común
+
+- Código = HMAC-SHA256 del id con una clave derivada (HKDF) de `ADMIN_API_KEY`, 22 caracteres
+  base64url (132 bits), comparado en tiempo constante. **Rotar ADMIN_API_KEY cambia el código de
+  todas las encuestas**: hay que repartir el enlace nuevo (el artifact siempre muestra el vigente).
+- Quien tiene el enlace puede votar en nombre de cualquiera de la lista: es el precio de no repartir
+  enlaces personales. La tabla muestra quién ha votado qué, así que una suplantación se ve.
+- Los resultados (nombres y votos) son visibles para cualquiera con el enlace.
 
 ## Administración: conector MCP para claude.ai
 
@@ -110,16 +125,17 @@ nada de esto se llama desde un navegador de otro origen (claude.ai lo llama desd
 
 | Herramienta | Entrada | Devuelve |
 |---|---|---|
-| `crear_encuesta` | `titulo`, `descripcion?`, `cierre`, `opciones[{inicio, fin}]` (1–50), `invitados[{email, nombre?}]` (1–200) | `id` y, por invitado, `nombre`, `email`, `enlace` (`/e/<id>?t=<token>`) |
+| `crear_encuesta` | `titulo`, `descripcion?`, `cierre`, `opciones[{inicio, fin}]` (1–50), `invitados[{nombre?, email?}]` (1–200; nombre o email, nombres sin repetir) | `id`, `enlace_comun` y, por invitado, `nombre`, `email` (null si no tiene), `enlace` personal |
 | `listar_encuestas` | — | `id`, `titulo`, `estado`, `cierre`, `invitados`, `respondidos` |
-| `detalle_encuesta` | `id` | opciones con `disponibles`, invitados con `votos` (matriz), `respondidos`/`pendientes`, `lider {disponibles, opciones[], empate}`, enlaces |
+| `detalle_encuesta` | `id` | `enlace_comun`, opciones con `disponibles`, invitados con `votos` (matriz) y `email` (null si no tiene), `respondidos`/`pendientes`, `lider {disponibles, opciones[], empate}`, enlaces personales |
 | `cerrar_encuesta` | `id` | `estado` (idempotente) |
 | `convocar_encuesta` | `id`, `opcion_id`, `evento_outlook_id?` | exige estado `cerrada`/`convocada` y opción de esa encuesta |
 | `marcar_enviados` | `id`, `emails[]` | `marcados[]`, `no_encontrados[]` |
 
 Fechas: ISO 8601 **con offset** (`2026-11-26T22:00:00+01:00`); sin offset se rechazan. Validación
 estricta en servidor (propiedades desconocidas, longitudes, emails, duplicados) y de nuevo en la BD.
-Errores de negocio: `result.isError = true` con `{"error": "<código>"}`.
+Errores de negocio: `result.isError = true` con `{"error": "<código>"}` (además de los de la BD: `nombres_repetidos`).
+Sin email se guarda uno ficticio (`sin-email-<16 hex>@jorcas.invalid`) porque la columna es NOT NULL; las herramientas lo devuelven como `null`.
 
 ### Dar de alta el conector en claude.ai
 
@@ -157,7 +173,7 @@ npm run build          # compilación de producción
 npm test               # tests (node:test): OAuth, MCP y migraciones contra Postgres en memoria (PGlite)
 ```
 
-Los tests no tocan Supabase: cargan las migraciones 0001–0004 en PGlite.
+Los tests no tocan Supabase: cargan las migraciones 0001–0005 en PGlite.
 
 `.env*` está en `.gitignore`. Ojo: con estas variables trabajas contra la BD de producción.
 

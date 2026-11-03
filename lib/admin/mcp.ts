@@ -15,6 +15,7 @@ import {
   validarSinArgumentos,
 } from "./validar.ts";
 import type { NuevaEncuesta } from "./validar.ts";
+import { enlaceComun, esEmailFicticio } from "../comun-codigo.ts";
 
 /** Acceso a datos (Supabase en producción, falso en los tests). Lanza ErrorDatos con el código. */
 export type Datos = {
@@ -56,7 +57,7 @@ export const HERRAMIENTAS = [
     name: "crear_encuesta",
     title: "Crear encuesta de fecha",
     description:
-      "Crea una encuesta con sus opciones (franjas de fecha y hora) e invitados en una sola transacción. Devuelve el id y, por invitado, su enlace personal de votación.",
+      "Crea una encuesta con sus opciones (franjas de fecha y hora) e invitados en una sola transacción. Cada invitado necesita nombre o email (los nombres no se repiten). Devuelve el id, el enlace común (enlace_comun: uno para todos, cada uno elige su nombre o se añade) y, por invitado, su enlace personal.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -72,8 +73,11 @@ export const HERRAMIENTAS = [
         invitados: {
           type: "array", minItems: 1, maxItems: LIMITES.invitados,
           items: {
-            type: "object", additionalProperties: false, required: ["email"],
-            properties: { email: { type: "string", maxLength: 254 }, nombre: { type: ["string", "null"], maxLength: LIMITES.nombre } },
+            type: "object", additionalProperties: false,
+            properties: {
+              email: { type: ["string", "null"], maxLength: 254, description: "Opcional si hay nombre" },
+              nombre: { type: ["string", "null"], maxLength: LIMITES.nombre, description: "Obligatorio si no hay email" },
+            },
           },
         },
       },
@@ -91,7 +95,7 @@ export const HERRAMIENTAS = [
     name: "detalle_encuesta",
     title: "Detalle de una encuesta",
     description:
-      "Opciones con número de disponibles, matriz invitado × opción, respondidos y pendientes, opción u opciones con más disponibles (empate marcado) y enlace de cada invitado.",
+      "Opciones con número de disponibles, matriz invitado × opción, respondidos y pendientes, opción u opciones con más disponibles (empate marcado), enlace común y enlace de cada invitado (email null si no tiene).",
     inputSchema: { type: "object", additionalProperties: false, required: ["id"], properties: { id: UUID } },
     annotations: { readOnlyHint: true, openWorldHint: false },
   },
@@ -133,7 +137,12 @@ async function ejecutar(nombre: string, args: unknown, datos: Datos): Promise<un
       const r = await datos.crear(e);
       return {
         id: r.id,
-        invitados: r.invitados.map((i) => ({ nombre: i.nombre, email: i.email, enlace: enlaceVoto(base, r.id, i.token) })),
+        enlace_comun: enlaceComun(base, r.id),
+        invitados: r.invitados.map((i) => ({
+          nombre: i.nombre,
+          email: esEmailFicticio(i.email) ? null : i.email,
+          enlace: enlaceVoto(base, r.id, i.token),
+        })),
       };
     }
     case "listar_encuestas": {
@@ -228,7 +237,7 @@ export async function manejarMcp(req: Request, datos: Datos): Promise<Response> 
       return ok({
         protocolVersion: version,
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "encuestas-jorcas-2027", title: "Encuestas de fecha · Jorcas 2027", version: "1.0.0" },
+        serverInfo: { name: "encuestas-jorcas-2027", title: "Encuestas de fecha · Jorcas 2027", version: "1.1.0" },
         instructions:
           "Administración de las encuestas de fecha de la Comisión de Fiestas de Jorcas 2027. Las fechas van en ISO 8601 con offset (hora de Madrid).",
       });

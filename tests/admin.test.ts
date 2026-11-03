@@ -1,4 +1,4 @@
-// OAuth + MCP de administración. Datos reales en PGlite con las migraciones 0001-0004.
+// OAuth + MCP de administración. Datos reales en PGlite con las migraciones 0001-0005.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
@@ -71,7 +71,7 @@ const datos: Datos = {
 before(async () => {
   db = new PGlite({ extensions: { pgcrypto } });
   await db.exec(`create role anon; create role authenticated; create role service_role;`);
-  for (const f of ["0001_esquema.sql", "0002_registrar_votos.sql", "0003_invitado_por_token.sql", "0004_admin.sql"]) {
+  for (const f of ["0001_esquema.sql", "0002_registrar_votos.sql", "0003_invitado_por_token.sql", "0004_admin.sql", "0005_enlace_comun.sql"]) {
     await db.exec(readFileSync(new URL(`../supabase/migrations/${f}`, import.meta.url), "utf8"));
   }
 });
@@ -304,6 +304,10 @@ test("MCP: validación estricta de crear_encuesta (nada se escribe)", async () =
     ["opciones_invalidas", { ...base, opciones: [{ inicio: "2027-02-31T10:00:00+01:00", fin: "2027-02-31T11:00:00+01:00" }] }],
     ["invitados_invalidos", { ...base, invitados: [{ email: "x" }] }],
     ["invitados_invalidos", { ...base, invitados: [{ email: "a@b.es" }, { email: "A@B.ES" }] }],
+    ["invitados_invalidos", { ...base, invitados: [{ nombre: "  " }] }], // ni nombre ni email
+    ["invitados_invalidos", { ...base, invitados: [{ email: "", nombre: null }] }],
+    ["invitados_invalidos", { ...base, invitados: [{ nombre: "Ana", email: "sin-email-0123456789abcdef@jorcas.invalid" }] }],
+    ["nombres_repetidos", { ...base, invitados: [{ nombre: "José  Pérez" }, { nombre: "jose perez", email: "j@x.es" }] }],
   ];
   const antes = (await db.query<{ n: number }>(`select count(*)::int n from encuestas`)).rows[0].n;
   for (const [codigo, args] of casos) {
@@ -349,7 +353,7 @@ test("MCP: flujo completo crear → votar → detalle → cerrar → convocar �
   assert.equal((await call("convocar_encuesta", { id, opcion_id: op2 })).structuredContent.error, "encuesta_abierta");
   assert.equal((await call("cerrar_encuesta", { id })).structuredContent.estado, "cerrada");
   assert.equal((await call("cerrar_encuesta", { id })).structuredContent.estado, "cerrada");
-  assert.equal((await call("convocar_encuesta", { id, opcion_id: det0.opciones[0].id.replace(/.$/, "0") })).structuredContent.error, "opcion_invalida");
+  assert.equal((await call("convocar_encuesta", { id, opcion_id: det0.opciones[0].id.replace(/.$/, (x: string) => (x === "0" ? "1" : "0")) })).structuredContent.error, "opcion_invalida");
   const conv = await call("convocar_encuesta", { id, opcion_id: op2, evento_outlook_id: "AAMkAD-test_id=" });
   assert.equal(conv.isError, false);
   assert.equal((await call("detalle_encuesta", { id })).structuredContent.estado, "convocada");
@@ -360,6 +364,38 @@ test("MCP: flujo completo crear → votar → detalle → cerrar → convocar �
 
   assert.equal((await call("detalle_encuesta", { id: "00000000-0000-0000-0000-000000000000" })).structuredContent.error, "encuesta_no_encontrada");
   assert.equal((await call("detalle_encuesta", { id: "no-uuid" })).structuredContent.error, "id_invalido");
+});
+
+test("MCP: email opcional y enlace común", async () => {
+  const { access_token: at } = await obtenerTokens();
+  const call = async (name: string, args: unknown) => (await rpc(at, "tools/call", { name, arguments: args })).body.result;
+  const c = await call("crear_encuesta", {
+    titulo: "Con enlace común", cierre: futuro(3),
+    opciones: [{ inicio: futuro(10), fin: futuro(10, "23:00") }],
+    invitados: [{ nombre: "Peña" }, { nombre: "Pena", email: "" }, { nombre: "Ana", email: "ana@example.com" }],
+  });
+  assert.equal(c.isError, false, JSON.stringify(c));
+  const { id, enlace_comun, invitados } = c.structuredContent;
+  assert.match(enlace_comun, new RegExp(`^${BASE}/e/${id}\\?c=[A-Za-z0-9_-]{22}$`));
+  assert.deepEqual(invitados.map((i: { email: string | null }) => i.email).sort(), ["ana@example.com", null, null].sort());
+  // En la BD hay emails ficticios únicos.
+  const em = (await db.query<{ email: string }>(`select email from invitados where encuesta_id=$1 and nombre in ('Peña','Pena')`, [id])).rows;
+  assert.equal(em.length, 2);
+  for (const r of em) assert.match(r.email, /^sin-email-[0-9a-f]{16}@jorcas\.invalid$/);
+  const det = (await call("detalle_encuesta", { id })).structuredContent;
+  assert.equal(det.enlace_comun, enlace_comun);
+  assert.equal(det.invitados.filter((i: { email: string | null }) => i.email === null).length, 2);
+
+  // El código depende del id y de la clave; se valida en tiempo constante.
+  const cod = await import("../lib/comun-codigo.ts");
+  const codigo = new URL(enlace_comun).searchParams.get("c");
+  assert.equal(cod.codigoComunValido(id, codigo), true);
+  assert.equal(cod.codigoComunValido(id.toUpperCase(), codigo), true);
+  assert.equal(cod.codigoComunValido(id, codigo!.slice(0, -1) + (codigo!.endsWith("A") ? "B" : "A")), false);
+  assert.equal(cod.codigoComunValido("00000000-0000-0000-0000-000000000000", codigo), false);
+  assert.equal(cod.codigoComunValido(id, undefined), false);
+  assert.equal(cod.claveNombre("  José   PÉREZ "), cod.claveNombre("jose perez"));
+  assert.notEqual(cod.claveNombre("Peña"), cod.claveNombre("Pena"));
 });
 
 test("cálculo: empate y sin votos", () => {

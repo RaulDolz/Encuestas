@@ -1,5 +1,6 @@
 // Validación estricta de los argumentos de las herramientas MCP.
 // La base de datos vuelve a validarlo todo (migración 0004); esto da errores claros antes.
+import { claveNombre, emailFicticio, esEmailFicticio } from "../comun-codigo.ts";
 
 export class ErrorEntrada extends Error {
   readonly codigo: string;
@@ -77,18 +78,34 @@ export function validarCrear(args: unknown, ahoraMs = Date.now()): NuevaEncuesta
     return { inicio, fin };
   });
 
+  // Email opcional (sin él se guarda uno ficticio); entonces el nombre es obligatorio.
+  // Los nombres no se repiten (clave sin tildes ni mayúsculas): en el enlace común cada uno elige el suyo.
   if (!Array.isArray(a.invitados) || a.invitados.length < 1 || a.invitados.length > LIMITES.invitados) throw new ErrorEntrada("invitados_invalidos");
   const emails = new Set<string>();
+  const nombres = new Set<string>();
   const invitados = a.invitados.map((i) => {
     const x = objeto(i, ["email", "nombre"], "invitados_invalidos");
-    if (typeof x.email !== "string" || x.email.length > 254) throw new ErrorEntrada("invitados_invalidos");
-    const email = x.email.trim().toLowerCase();
-    if (!EMAIL_RE.test(email) || emails.has(email)) throw new ErrorEntrada("invitados_invalidos");
-    emails.add(email);
     let nombre: string | null = null;
     if (x.nombre !== undefined && x.nombre !== null) {
-      if (typeof x.nombre !== "string" || x.nombre.trim().length > LIMITES.nombre) throw new ErrorEntrada("invitados_invalidos");
-      nombre = x.nombre.trim() || null;
+      if (typeof x.nombre !== "string") throw new ErrorEntrada("invitados_invalidos");
+      nombre = x.nombre.trim().replace(/\s+/g, " ") || null;
+      if (nombre && nombre.length > LIMITES.nombre) throw new ErrorEntrada("invitados_invalidos");
+    }
+    let email: string;
+    if (x.email === undefined || x.email === null || (typeof x.email === "string" && x.email.trim() === "")) {
+      if (!nombre) throw new ErrorEntrada("invitados_invalidos");
+      email = emailFicticio();
+    } else {
+      if (typeof x.email !== "string" || x.email.length > 254) throw new ErrorEntrada("invitados_invalidos");
+      email = x.email.trim().toLowerCase();
+      if (!EMAIL_RE.test(email) || esEmailFicticio(email)) throw new ErrorEntrada("invitados_invalidos");
+    }
+    if (emails.has(email)) throw new ErrorEntrada("invitados_invalidos");
+    emails.add(email);
+    if (nombre) {
+      const k = claveNombre(nombre);
+      if (nombres.has(k)) throw new ErrorEntrada("nombres_repetidos");
+      nombres.add(k);
     }
     return { email, nombre };
   });

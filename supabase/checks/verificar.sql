@@ -22,6 +22,9 @@ select f.funcion, r.rolname,
                     ('invitado_por_token', 'public.invitado_por_token(uuid, text)'),
                     ('admin_crear_encuesta',    'public.admin_crear_encuesta(text, text, timestamptz, jsonb, jsonb)'),
                     ('admin_cerrar_encuesta',   'public.admin_cerrar_encuesta(uuid)'),
-                    ('admin_convocar_encuesta', 'public.admin_convocar_encuesta(uuid, uuid, text)')) as f(funcion, firma)
+                    ('admin_convocar_encuesta', 'public.admin_convocar_encuesta(uuid, uuid, text)'),
+                    ('clave_nombre',            'public.clave_nombre(text)'),
+                    ('token_de_invitado',       'public.token_de_invitado(uuid, uuid)'),
+                    ('alta_invitado_comun',     'public.alta_invitado_comun(uuid, text)')) as f(funcion, firma)
  where r.rolname in ('anon', 'authenticated', 'service_role', 'postgres')
  order by 1, 2;

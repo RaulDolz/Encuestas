@@ -45,6 +45,13 @@ const nextConfig: NextConfig = {
           has: [{ type: "query", key: "t" }],
           destination: "/e/:id/acceso",
         },
+        // /e/<id>?c=<código> (enlace común) -> página para elegir nombre o añadirse.
+        {
+          source: "/e/:id",
+          has: [{ type: "query", key: "c" }],
+          missing: [{ type: "query", key: "t" }],
+          destination: "/e/:id/comun",
+        },
       ],
       // Descubrimiento OAuth (RFC 9728 / RFC 8414) para el conector MCP de claude.ai.
       afterFiles: [

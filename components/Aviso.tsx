@@ -10,7 +10,7 @@ export function Aviso({ titulo, texto }: { titulo: string; texto?: string }) {
 }
 
 export const EnlaceNoValido = () => (
-  <Aviso titulo="Enlace no válido" texto="Usa el enlace personal que recibiste por correo." />
+  <Aviso titulo="Enlace no válido" texto="Comprueba que has copiado el enlace completo o pide que te lo vuelvan a enviar." />
 );
 
 export const NoDisponible = () => (

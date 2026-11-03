@@ -7,3 +7,6 @@ export const COOKIE_MAX_AGE = 60 * 60 * 24 * 120;
 export function rutaEncuesta(encuestaId: string): string {
   return `/e/${encuestaId}`;
 }
+
+/** Cookie con el código del enlace común (solo si se entró por él): permite «Cambiar de persona». */
+export const COOKIE_CODIGO = "jorcas_c";
