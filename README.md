@@ -131,6 +131,7 @@ nada de esto se llama desde un navegador de otro origen (claude.ai lo llama desd
 | `cerrar_encuesta` | `id` | `estado` (idempotente) |
 | `convocar_encuesta` | `id`, `opcion_id`, `evento_outlook_id?` | exige estado `cerrada`/`convocada` y opción de esa encuesta |
 | `marcar_enviados` | `id`, `emails[]` | `marcados[]`, `no_encontrados[]` |
+| `borrar_encuesta` | `id` | `{id, borrada: true}`. Borra la encuesta y, en cascada, opciones, invitados y votos (cualquier estado). No toca eventos de Outlook. `encuesta_no_encontrada` si no existe. |
 
 Fechas: ISO 8601 **con offset** (`2026-11-26T22:00:00+01:00`); sin offset se rechazan. Validación
 estricta en servidor (propiedades desconocidas, longitudes, emails, duplicados) y de nuevo en la BD.

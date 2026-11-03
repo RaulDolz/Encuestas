@@ -66,6 +66,10 @@ const datos: Datos = {
     );
     return r.rows.map((x) => x.email);
   },
+  async borrar(id) {
+    const r = await db.query(`delete from encuestas where id=$1 returning id`, [id]);
+    return r.rows.length > 0;
+  },
 };
 
 before(async () => {
@@ -271,7 +275,7 @@ test("MCP: initialize, tools/list, notificaciones, método desconocido, lotes y 
   const lista = await rpc(at, "tools/list");
   assert.deepEqual(
     lista.body.result.tools.map((t: { name: string }) => t.name).sort(),
-    ["cerrar_encuesta", "convocar_encuesta", "crear_encuesta", "detalle_encuesta", "listar_encuestas", "marcar_enviados"],
+    ["borrar_encuesta", "cerrar_encuesta", "convocar_encuesta", "crear_encuesta", "detalle_encuesta", "listar_encuestas", "marcar_enviados"],
   );
 
   const notif = await manejarMcp(new Request(`${BASE}/api/mcp`, {
@@ -396,6 +400,30 @@ test("MCP: email opcional y enlace común", async () => {
   assert.equal(cod.codigoComunValido(id, undefined), false);
   assert.equal(cod.claveNombre("  José   PÉREZ "), cod.claveNombre("jose perez"));
   assert.notEqual(cod.claveNombre("Peña"), cod.claveNombre("Pena"));
+});
+
+test("MCP: borrar_encuesta borra en cascada y es idempotente en el error", async () => {
+  const { access_token: at } = await obtenerTokens();
+  const call = async (name: string, args: unknown) => (await rpc(at, "tools/call", { name, arguments: args })).body.result;
+  const c = (await call("crear_encuesta", {
+    titulo: "Para borrar", cierre: futuro(3),
+    opciones: [{ inicio: futuro(10), fin: futuro(10, "23:00") }],
+    invitados: [{ nombre: "Ana", email: "ana@example.com" }, { nombre: "Luis" }],
+  })).structuredContent;
+  const det = (await call("detalle_encuesta", { id: c.id })).structuredContent;
+  const tok = new URL(c.invitados[0].enlace).searchParams.get("t");
+  await db.query(`select registrar_votos($1,$2,$3::jsonb)`, [c.id, tok, JSON.stringify([{ opcion_id: det.opciones[0].id, disponible: true }])]);
+
+  const r = await call("borrar_encuesta", { id: c.id });
+  assert.equal(r.isError, false);
+  assert.deepEqual(r.structuredContent, { id: c.id, borrada: true });
+  const quedan = (await db.query<{ o: number; i: number }>(
+    `select (select count(*)::int from opciones where encuesta_id=$1) o, (select count(*)::int from invitados where encuesta_id=$1) i`, [c.id])).rows[0];
+  assert.deepEqual(quedan, { o: 0, i: 0 });
+  assert.equal((await db.query<{ n: number }>(`select count(*)::int n from votos where opcion_id=$1`, [det.opciones[0].id])).rows[0].n, 0);
+  assert.equal((await call("borrar_encuesta", { id: c.id })).structuredContent.error, "encuesta_no_encontrada");
+  assert.equal((await call("borrar_encuesta", { id: "x" })).structuredContent.error, "id_invalido");
+  assert.equal((await call("borrar_encuesta", {})).structuredContent.error, "id_invalido");
 });
 
 test("cálculo: empate y sin votos", () => {

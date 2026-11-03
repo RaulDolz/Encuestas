@@ -86,4 +86,11 @@ export const datosSupabase: Datos = {
     if (error) fallo("marcar enviados", error);
     return ((data ?? []) as { email: string }[]).map((r) => r.email);
   },
+
+  async borrar(id) {
+    // Las FK de opciones, invitados y votos son ON DELETE CASCADE (0001).
+    const { data, error } = await getSupabase().from("encuestas").delete().eq("id", id).select("id");
+    if (error) fallo("borrar encuesta", error);
+    return ((data ?? []) as { id: string }[]).length > 0;
+  },
 };

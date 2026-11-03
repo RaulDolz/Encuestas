@@ -28,6 +28,8 @@ export type Datos = {
   cerrar(id: string): Promise<string>;
   convocar(id: string, opcionId: string, evento: string | null): Promise<void>;
   marcarEnviados(id: string, emails: string[]): Promise<string[]>;
+  /** Borra la encuesta (opciones, invitados y votos caen en cascada). false si no existía. */
+  borrar(id: string): Promise<boolean>;
 };
 
 export class ErrorDatos extends Error {
@@ -127,6 +129,14 @@ export const HERRAMIENTAS = [
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
+  {
+    name: "borrar_encuesta",
+    title: "Borrar encuesta",
+    description:
+      "Borra la encuesta definitivamente, con sus opciones, invitados y votos. No toca ningún evento de Outlook. Los enlaces de la encuesta dejan de funcionar.",
+    inputSchema: { type: "object", additionalProperties: false, required: ["id"], properties: { id: UUID } },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  },
 ] as const;
 
 async function ejecutar(nombre: string, args: unknown, datos: Datos): Promise<unknown> {
@@ -169,6 +179,11 @@ async function ejecutar(nombre: string, args: unknown, datos: Datos): Promise<un
       const a = validarEnviados(args);
       const marcados = await datos.marcarEnviados(a.id, a.emails);
       return { id: a.id, marcados, no_encontrados: a.emails.filter((e) => !marcados.includes(e)) };
+    }
+    case "borrar_encuesta": {
+      const { id } = validarId(args);
+      if (!(await datos.borrar(id))) throw new ErrorDatos("encuesta_no_encontrada");
+      return { id, borrada: true };
     }
     default:
       throw new ErrorRpc(-32602, "Herramienta desconocida");
@@ -237,7 +252,7 @@ export async function manejarMcp(req: Request, datos: Datos): Promise<Response> 
       return ok({
         protocolVersion: version,
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "encuestas-jorcas-2027", title: "Encuestas de fecha · Jorcas 2027", version: "1.1.0" },
+        serverInfo: { name: "encuestas-jorcas-2027", title: "Encuestas de fecha · Jorcas 2027", version: "1.2.0" },
         instructions:
           "Administración de las encuestas de fecha de la Comisión de Fiestas de Jorcas 2027. Las fechas van en ISO 8601 con offset (hora de Madrid).",
       });
