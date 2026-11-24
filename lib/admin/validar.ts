@@ -1,6 +1,7 @@
 // Validación estricta de los argumentos de las herramientas MCP.
 // La base de datos vuelve a validarlo todo (migración 0004); esto da errores claros antes.
 import { claveNombre, emailFicticio, esEmailFicticio } from "../comun-codigo.ts";
+// (editar_encuesta: migración 0006)
 
 export class ErrorEntrada extends Error {
   readonly codigo: string;
@@ -111,6 +112,99 @@ export function validarCrear(args: unknown, ahoraMs = Date.now()): NuevaEncuesta
   });
 
   return { titulo, descripcion, cierre, opciones, invitados };
+}
+
+export type CambiosEncuesta = {
+  titulo?: string;
+  descripcion?: string | null;
+  cierre?: string;
+  reabrir?: boolean;
+  opciones_nuevas?: { inicio: string; fin: string }[];
+  opciones_quitar?: string[];
+  invitados_nuevos?: { nombre: string | null; email: string | null }[];
+  invitados_editar?: { id: string; nombre?: string | null; email?: string | null }[];
+  invitados_quitar?: string[];
+};
+
+/** editar_encuesta: valida la forma; las reglas que dependen de lo que ya hay (repetidos, límites) las aplica la BD. */
+export function validarEditar(args: unknown, ahoraMs = Date.now()): { id: string; cambios: CambiosEncuesta } {
+  const a = objeto(args, ["id", "titulo", "descripcion", "cierre", "reabrir", "opciones_nuevas", "opciones_quitar",
+    "invitados_nuevos", "invitados_editar", "invitados_quitar"], "argumentos_invalidos");
+  const id = uuid(a.id);
+  const c: CambiosEncuesta = {};
+  const lista = (v: unknown, max: number, codigo: string): unknown[] => {
+    if (!Array.isArray(v) || v.length > max) throw new ErrorEntrada(codigo);
+    return v;
+  };
+  const nombreDe = (v: unknown): string | null => {
+    if (v === undefined || v === null) return null;
+    if (typeof v !== "string") throw new ErrorEntrada("invitados_invalidos");
+    const n = v.trim().replace(/\s+/g, " ");
+    if (n.length > LIMITES.nombre) throw new ErrorEntrada("invitados_invalidos");
+    return n || null;
+  };
+  const emailDe = (v: unknown): string | null => {
+    if (v === undefined || v === null) return null;
+    if (typeof v !== "string" || v.length > 254) throw new ErrorEntrada("invitados_invalidos");
+    const e = v.trim().toLowerCase();
+    if (!e) return null;
+    if (!EMAIL_RE.test(e) || esEmailFicticio(e)) throw new ErrorEntrada("invitados_invalidos");
+    return e;
+  };
+
+  if (a.titulo !== undefined) {
+    if (typeof a.titulo !== "string" || !a.titulo.trim() || a.titulo.trim().length > LIMITES.titulo) throw new ErrorEntrada("titulo_invalido");
+    c.titulo = a.titulo.trim();
+  }
+  if (a.descripcion !== undefined) {
+    if (a.descripcion !== null && (typeof a.descripcion !== "string" || a.descripcion.trim().length > LIMITES.descripcion)) throw new ErrorEntrada("descripcion_invalida");
+    c.descripcion = typeof a.descripcion === "string" ? a.descripcion.trim() || null : null;
+  }
+  if (a.cierre !== undefined) {
+    c.cierre = fecha(a.cierre, "cierre_invalido");
+    if (Date.parse(c.cierre) <= ahoraMs) throw new ErrorEntrada("cierre_invalido");
+  }
+  if (a.reabrir !== undefined) {
+    if (typeof a.reabrir !== "boolean") throw new ErrorEntrada("argumentos_invalidos");
+    c.reabrir = a.reabrir;
+  }
+  if (a.opciones_quitar !== undefined) c.opciones_quitar = [...new Set(lista(a.opciones_quitar, LIMITES.opciones, "opcion_invalida").map((x) => uuid(x, "opcion_invalida")))];
+  if (a.opciones_nuevas !== undefined) {
+    c.opciones_nuevas = lista(a.opciones_nuevas, LIMITES.opciones, "opciones_invalidas").map((o) => {
+      const x = objeto(o, ["inicio", "fin"], "opciones_invalidas");
+      const inicio = fecha(x.inicio, "opciones_invalidas"), fin = fecha(x.fin, "opciones_invalidas");
+      if (Date.parse(fin) <= Date.parse(inicio) || Date.parse(inicio) <= ahoraMs) throw new ErrorEntrada("opciones_invalidas");
+      return { inicio, fin };
+    });
+  }
+  if (a.invitados_quitar !== undefined) c.invitados_quitar = [...new Set(lista(a.invitados_quitar, LIMITES.invitados, "invitado_invalido").map((x) => uuid(x, "invitado_invalido")))];
+  if (a.invitados_editar !== undefined) {
+    const vistos = new Set<string>();
+    c.invitados_editar = lista(a.invitados_editar, LIMITES.invitados, "invitados_invalidos").map((i) => {
+      const x = objeto(i, ["id", "nombre", "email"], "invitados_invalidos");
+      const id2 = uuid(x.id, "invitado_invalido");
+      if (vistos.has(id2)) throw new ErrorEntrada("invitados_invalidos");
+      vistos.add(id2);
+      const out: { id: string; nombre?: string | null; email?: string | null } = { id: id2 };
+      if ("nombre" in x) out.nombre = nombreDe(x.nombre);
+      if ("email" in x) out.email = emailDe(x.email);
+      return out;
+    });
+  }
+  if (a.invitados_nuevos !== undefined) {
+    c.invitados_nuevos = lista(a.invitados_nuevos, LIMITES.invitados, "invitados_invalidos").map((i) => {
+      const x = objeto(i, ["nombre", "email"], "invitados_invalidos");
+      const nombre = nombreDe(x.nombre), email = emailDe(x.email);
+      if (!nombre && !email) throw new ErrorEntrada("invitados_invalidos");
+      return { nombre, email };
+    });
+  }
+  // Nombres repetidos dentro de lo que llega (la BD comprueba también contra lo que ya hay).
+  const nn = [...(c.invitados_nuevos || []).map((i) => i.nombre), ...(c.invitados_editar || []).map((i) => i.nombre)]
+    .filter((n): n is string => !!n).map(claveNombre);
+  if (new Set(nn).size !== nn.length) throw new ErrorEntrada("nombres_repetidos");
+  if (!Object.keys(c).length) throw new ErrorEntrada("sin_cambios");
+  return { id, cambios: c };
 }
 
 export function validarSinArgumentos(args: unknown): void {

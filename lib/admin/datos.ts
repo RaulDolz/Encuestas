@@ -87,6 +87,13 @@ export const datosSupabase: Datos = {
     return ((data ?? []) as { email: string }[]).map((r) => r.email);
   },
 
+  async editar(id, cambios) {
+    const { data, error } = await getSupabase().rpc("admin_editar_encuesta", { p_encuesta: id, p_cambios: cambios });
+    if (error) fallo("admin_editar_encuesta", error);
+    const estado = (data as { estado?: unknown } | null)?.estado;
+    return typeof estado === "string" ? estado : "abierta";
+  },
+
   async borrar(id) {
     // Las FK de opciones, invitados y votos son ON DELETE CASCADE (0001).
     const { data, error } = await getSupabase().from("encuestas").delete().eq("id", id).select("id");

@@ -45,6 +45,7 @@ con `import "server-only"`. Si falta alguna variable, el log del servidor muestr
 | `supabase/migrations/0003_invitado_por_token.sql` | Función `invitado_por_token(p_encuesta, p_token)` → `(id, nombre)`: `security definer`, solo `service_role`. La app busca al invitado por RPC (POST) para que el token no aparezca en la URL ni en los logs del gateway de Supabase. |
 | `supabase/migrations/0004_admin.sql` | Funciones de administración para el conector MCP: `admin_crear_encuesta` (encuesta + opciones + invitados en una transacción), `admin_cerrar_encuesta`, `admin_convocar_encuesta`. `security definer`, solo `service_role`. No cambia ninguna tabla. |
 | `supabase/migrations/0005_enlace_comun.sql` | Enlace común: `token_de_invitado` (token de un invitado de esa encuesta), `alta_invitado_comun` (alta por nombre con email ficticio `sin-email-<hex>@jorcas.invalid`; solo con la votación abierta, máx. 200, sin nombres repetidos) y `clave_nombre` (comparación sin tildes ni mayúsculas, conserva la ñ). `security definer`, solo `service_role`. No cambia ninguna tabla. |
+| `supabase/migrations/0006_editar_encuesta.sql` | `admin_editar_encuesta(p_encuesta, p_cambios jsonb)`: cambia título, descripción, cierre, reabrir, añade/quita opciones y añade/edita/quita invitados en **una transacción** (todo o nada). No se puede editar una encuesta convocada. `security definer`, solo `service_role`. No cambia ninguna tabla. |
 | `supabase/checks/verificar.sql` | Solo lectura: estado de RLS, políticas y permisos de la función. |
 
 ### Aplicarlas en Supabase (SQL Editor)
@@ -55,7 +56,8 @@ con `import "server-only"`. Si falta alguna variable, el log del servidor muestr
 4. Nueva query con `0003_invitado_por_token.sql` → **Run**.
 5. Nueva query con `0004_admin.sql` → **Run**.
 6. Nueva query con `0005_enlace_comun.sql` → **Run**.
-7. Nueva query con `supabase/checks/verificar.sql` → **Run**. Esperado:
+7. Nueva query con `0006_editar_encuesta.sql` → **Run**.
+8. Nueva query con `supabase/checks/verificar.sql` → **Run**. Esperado:
    - `rls = true` en las 4 tablas.
    - Ninguna política para `anon`/`authenticated`.
    - `registrar_votos`, `invitado_por_token`, las tres `admin_*`, `clave_nombre`, `token_de_invitado` y `alta_invitado_comun`: `anon` y `authenticated` = `false`, `service_role` = `true`.
@@ -132,6 +134,7 @@ nada de esto se llama desde un navegador de otro origen (claude.ai lo llama desd
 | `cerrar_encuesta` | `id` | `estado` (idempotente) |
 | `convocar_encuesta` | `id`, `opcion_id`, `evento_outlook_id?` | exige estado `cerrada`/`convocada` y opción de esa encuesta |
 | `marcar_enviados` | `id`, `emails[]` | `marcados[]`, `no_encontrados[]` |
+| `editar_encuesta` | `id` y cualquiera de: `titulo`, `descripcion`, `cierre`, `reabrir`, `opciones_nuevas[{inicio, fin}]`, `opciones_quitar[id]`, `invitados_nuevos[{nombre?, email?}]`, `invitados_editar[{id, nombre?, email?}]`, `invitados_quitar[id]` | `{id, estado}`. Todo o nada. Quitar una opción o un invitado borra sus votos. Los enlaces no cambian. Errores: `encuesta_convocada`, `nombres_repetidos`, `invitado_invalido`, `sin_cambios`… |
 | `borrar_encuesta` | `id` | `{id, borrada: true}`. Borra la encuesta y, en cascada, opciones, invitados y votos (cualquier estado). No toca eventos de Outlook. `encuesta_no_encontrada` si no existe. |
 
 Fechas: ISO 8601 **con offset** (`2026-11-26T22:00:00+01:00`); sin offset se rechazan. Validación
@@ -183,7 +186,7 @@ npm run build          # compilación de producción
 npm test               # tests (node:test): OAuth, MCP y migraciones contra Postgres en memoria (PGlite)
 ```
 
-Los tests no tocan Supabase: cargan las migraciones 0001–0005 en PGlite.
+Los tests no tocan Supabase: cargan las migraciones 0001–0006 en PGlite.
 
 `.env*` está en `.gitignore`. Ojo: con estas variables trabajas contra la BD de producción.
 

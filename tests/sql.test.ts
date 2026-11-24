@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 
-const MIG = ["0001_esquema.sql", "0002_registrar_votos.sql", "0003_invitado_por_token.sql", "0004_admin.sql", "0005_enlace_comun.sql"];
+const MIG = ["0001_esquema.sql", "0002_registrar_votos.sql", "0003_invitado_por_token.sql", "0004_admin.sql", "0005_enlace_comun.sql", "0006_editar_encuesta.sql"];
 const sql = (f: string) => readFileSync(new URL(`../supabase/migrations/${f}`, import.meta.url), "utf8");
 
 let db: PGlite;
@@ -62,7 +62,7 @@ test("solo service_role puede ejecutar las funciones admin", async () => {
            has_function_privilege('service_role', p.oid, 'execute') sr,
            p.prosecdef definer
       from pg_proc p where p.proname like 'admin\\_%' order by 1`);
-  assert.equal(r.rows.length, 3);
+  assert.equal(r.rows.length, 4); // crear, cerrar, convocar (0004) y editar (0006)
   for (const row of r.rows) {
     assert.equal(row.anon, false, row.f);
     assert.equal(row.auth, false, row.f);
@@ -248,4 +248,30 @@ test("alta_invitado_comun: máximo 200 invitados", async () => {
 test("el email ficticio pasa la validación de admin_crear_encuesta", async () => {
   const e = await crear({ invitados: [{ email: "sin-email-0123456789abcdef@jorcas.invalid", nombre: "Sin email" }] });
   assert.equal(e.invitados[0].email, "sin-email-0123456789abcdef@jorcas.invalid");
+});
+
+// ---------------------------------------------------------------------------
+// 0006: editar encuesta
+// ---------------------------------------------------------------------------
+test("0006 es re-ejecutable, solo service_role, y es todo o nada", async () => {
+  await db.exec(sql("0006_editar_encuesta.sql"));
+  const p = (await db.query<{ anon: boolean; auth: boolean; sr: boolean }>(`
+    select has_function_privilege('anon', p.oid, 'execute') anon, has_function_privilege('authenticated', p.oid, 'execute') auth,
+           has_function_privilege('service_role', p.oid, 'execute') sr
+      from pg_proc p where p.proname = 'admin_editar_encuesta'`)).rows[0];
+  assert.deepEqual([p.anon, p.auth, p.sr], [false, false, true]);
+
+  const e = await crear({ invitados: [{ email: "ana@example.com", nombre: "Ana" }, { email: "luis@example.com", nombre: "Luis" }] });
+  // El segundo cambio falla (nombre repetido): el título no debe cambiar.
+  assert.equal(await errorDe(db.query(`select public.admin_editar_encuesta($1, $2::jsonb)`,
+    [e.id, JSON.stringify({ titulo: "Cambiado", invitados_nuevos: [{ nombre: "ANA" }] })])), "nombres_repetidos");
+  const t = (await db.query<{ titulo: string }>(`select titulo from encuestas where id=$1`, [e.id])).rows[0].titulo;
+  assert.notEqual(t, "Cambiado");
+  // Quitar un invitado borra sus votos.
+  const luis = e.invitados.find((i) => i.nombre === "Luis")!;
+  await db.query(`select registrar_votos($1,$2,$3::jsonb)`, [e.id, luis.token, JSON.stringify([{ opcion_id: e.opciones[0].id, disponible: true }])]);
+  await db.query(`select public.admin_editar_encuesta($1, $2::jsonb)`, [e.id, JSON.stringify({ invitados_quitar: [luis.id] })]);
+  const v = (await db.query<{ n: number }>(`select count(*)::int n from votos where invitado_id=$1`, [luis.id])).rows[0].n;
+  assert.equal(v, 0);
+  assert.equal(await errorDe(db.query(`select public.admin_editar_encuesta($1, '{"x":1}'::jsonb)`, [e.id])), "cambios_invalidos");
 });

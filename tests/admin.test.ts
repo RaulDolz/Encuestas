@@ -66,6 +66,10 @@ const datos: Datos = {
     );
     return r.rows.map((x) => x.email);
   },
+  async editar(id, cambios) {
+    const r = await db.query<{ r: { estado: string } }>(`select public.admin_editar_encuesta($1, $2::jsonb) r`, [id, JSON.stringify(cambios)]).catch(pgError);
+    return r.rows[0].r.estado;
+  },
   async borrar(id) {
     const r = await db.query(`delete from encuestas where id=$1 returning id`, [id]);
     return r.rows.length > 0;
@@ -75,7 +79,7 @@ const datos: Datos = {
 before(async () => {
   db = new PGlite({ extensions: { pgcrypto } });
   await db.exec(`create role anon; create role authenticated; create role service_role;`);
-  for (const f of ["0001_esquema.sql", "0002_registrar_votos.sql", "0003_invitado_por_token.sql", "0004_admin.sql", "0005_enlace_comun.sql"]) {
+  for (const f of ["0001_esquema.sql", "0002_registrar_votos.sql", "0003_invitado_por_token.sql", "0004_admin.sql", "0005_enlace_comun.sql", "0006_editar_encuesta.sql"]) {
     await db.exec(readFileSync(new URL(`../supabase/migrations/${f}`, import.meta.url), "utf8"));
   }
 });
@@ -275,7 +279,7 @@ test("MCP: initialize, tools/list, notificaciones, método desconocido, lotes y 
   const lista = await rpc(at, "tools/list");
   assert.deepEqual(
     lista.body.result.tools.map((t: { name: string }) => t.name).sort(),
-    ["borrar_encuesta", "cerrar_encuesta", "convocar_encuesta", "crear_encuesta", "detalle_encuesta", "listar_encuestas", "marcar_enviados"],
+    ["borrar_encuesta", "cerrar_encuesta", "convocar_encuesta", "crear_encuesta", "detalle_encuesta", "editar_encuesta", "listar_encuestas", "marcar_enviados"],
   );
 
   const notif = await manejarMcp(new Request(`${BASE}/api/mcp`, {
@@ -424,6 +428,70 @@ test("MCP: borrar_encuesta borra en cascada y es idempotente en el error", async
   assert.equal((await call("borrar_encuesta", { id: c.id })).structuredContent.error, "encuesta_no_encontrada");
   assert.equal((await call("borrar_encuesta", { id: "x" })).structuredContent.error, "id_invalido");
   assert.equal((await call("borrar_encuesta", {})).structuredContent.error, "id_invalido");
+});
+
+test("MCP: editar_encuesta añade, cambia y quita personas y opciones", async () => {
+  const { access_token: at } = await obtenerTokens();
+  const call = async (name: string, args: unknown) => (await rpc(at, "tools/call", { name, arguments: args })).body.result;
+  const c = (await call("crear_encuesta", {
+    titulo: "Para editar", cierre: futuro(3),
+    opciones: [{ inicio: futuro(10), fin: futuro(10, "23:00") }, { inicio: futuro(11), fin: futuro(11, "23:00") }],
+    invitados: [{ nombre: "Ana", email: "ana@example.com" }, { nombre: "Luis" }, { nombre: "Pepa" }],
+  })).structuredContent;
+  let det = (await call("detalle_encuesta", { id: c.id })).structuredContent;
+  const porNombre = (n: string) => det.invitados.find((i: { nombre: string }) => i.nombre === n);
+  const tokLuis = new URL(porNombre("Luis").enlace).searchParams.get("t");
+  await db.query(`select registrar_votos($1,$2,$3::jsonb)`, [c.id, tokLuis, JSON.stringify([{ opcion_id: det.opciones[0].id, disponible: true }])]);
+
+  const r = await call("editar_encuesta", {
+    id: c.id, titulo: "Editada", descripcion: "Nueva descripción", cierre: futuro(5),
+    opciones_nuevas: [{ inicio: futuro(12), fin: futuro(12, "23:00") }],
+    opciones_quitar: [det.opciones[1].id],
+    invitados_nuevos: [{ nombre: "María José" }, { nombre: "Carlos", email: "Carlos@Example.com" }],
+    invitados_editar: [{ id: porNombre("Ana").id, nombre: "Ana López", email: "" }, { id: porNombre("Luis").id, email: "luis@example.com" }],
+    invitados_quitar: [porNombre("Pepa").id],
+  });
+  assert.equal(r.isError, false, JSON.stringify(r));
+  assert.deepEqual(r.structuredContent, { id: c.id, estado: "abierta" });
+  const antes = det;
+  det = (await call("detalle_encuesta", { id: c.id })).structuredContent;
+  assert.equal(det.titulo, "Editada");
+  assert.equal(det.descripcion, "Nueva descripción");
+  assert.equal(det.opciones.length, 2);
+  assert.deepEqual(det.opciones.map((o: { orden: number }) => o.orden), [1, 2]);
+  assert.deepEqual(det.invitados.map((i: { nombre: string }) => i.nombre).sort(), ["Ana López", "Carlos", "Luis", "María José"]);
+  const ana = det.invitados.find((i: { nombre: string }) => i.nombre === "Ana López");
+  assert.equal(ana.email, null); // pasa a sin email (ficticio en la BD)
+  assert.equal(det.invitados.find((i: { nombre: string }) => i.nombre === "Carlos").email, "carlos@example.com");
+  const luis = det.invitados.find((i: { nombre: string }) => i.nombre === "Luis");
+  assert.equal(luis.email, "luis@example.com");
+  assert.equal(luis.respondido, true); // su voto sigue
+  assert.equal(luis.enlace, antes.invitados.find((i: { nombre: string }) => i.nombre === "Luis").enlace); // el enlace no cambia
+  assert.equal(det.enlace_comun, antes.enlace_comun);
+
+  const err = async (args: unknown) => (await call("editar_encuesta", { id: c.id, ...(args as object) })).structuredContent.error;
+  assert.equal(await err({ invitados_nuevos: [{ nombre: "ana  lópez" }] }), "nombres_repetidos");
+  assert.equal(await err({ invitados_nuevos: [{ nombre: "X", email: "luis@example.com" }] }), "invitados_invalidos");
+  assert.equal(await err({ invitados_quitar: det.invitados.map((i: { id: string }) => i.id) }), "invitados_invalidos");
+  assert.equal(await err({ opciones_quitar: det.opciones.map((o: { id: string }) => o.id) }), "opciones_invalidas");
+  assert.equal(await err({ opciones_nuevas: [{ inicio: det.opciones[0].inicio, fin: det.opciones[0].fin }] }), "opciones_invalidas");
+  assert.equal(await err({ invitados_quitar: ["00000000-0000-0000-0000-000000000000"] }), "invitado_invalido");
+  assert.equal(await err({ opciones_quitar: ["00000000-0000-0000-0000-000000000000"] }), "opcion_invalida");
+  assert.equal(await err({ invitados_nuevos: [{}] }), "invitados_invalidos");
+  assert.equal(await err({}), "sin_cambios");
+  assert.equal(await err({ cierre: "2020-01-01T00:00:00+01:00" }), "cierre_invalido");
+  assert.equal(await err({ otra: 1 }), "argumentos_invalidos");
+  // Nada de lo anterior aplicó cambios a medias.
+  const det2 = (await call("detalle_encuesta", { id: c.id })).structuredContent;
+  assert.equal(det2.invitados.length, 4);
+  assert.equal(det2.opciones.length, 2);
+
+  // Cerrada -> reabrir; convocada -> no se puede editar.
+  await call("cerrar_encuesta", { id: c.id });
+  assert.equal((await call("editar_encuesta", { id: c.id, reabrir: true })).structuredContent.estado, "abierta");
+  await call("cerrar_encuesta", { id: c.id });
+  await call("convocar_encuesta", { id: c.id, opcion_id: det2.opciones[0].id });
+  assert.equal(await err({ titulo: "Otra" }), "encuesta_convocada");
 });
 
 test("cálculo: empate y sin votos", () => {

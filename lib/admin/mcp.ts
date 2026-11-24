@@ -10,11 +10,12 @@ import {
   LIMITES,
   validarConvocar,
   validarCrear,
+  validarEditar,
   validarEnviados,
   validarId,
   validarSinArgumentos,
 } from "./validar.ts";
-import type { NuevaEncuesta } from "./validar.ts";
+import type { NuevaEncuesta, CambiosEncuesta } from "./validar.ts";
 import { enlaceComun, esEmailFicticio } from "../comun-codigo.ts";
 
 /** Acceso a datos (Supabase en producción, falso en los tests). Lanza ErrorDatos con el código. */
@@ -28,6 +29,8 @@ export type Datos = {
   cerrar(id: string): Promise<string>;
   convocar(id: string, opcionId: string, evento: string | null): Promise<void>;
   marcarEnviados(id: string, emails: string[]): Promise<string[]>;
+  /** Aplica los cambios en una transacción (0006). Devuelve el estado final. */
+  editar(id: string, cambios: CambiosEncuesta): Promise<string>;
   /** Borra la encuesta (opciones, invitados y votos caen en cascada). false si no existía. */
   borrar(id: string): Promise<boolean>;
 };
@@ -45,6 +48,7 @@ export class ErrorDatos extends Error {
 export const CODIGOS_NEGOCIO = new Set([
   "titulo_invalido", "descripcion_invalida", "cierre_invalido", "opciones_invalidas", "invitados_invalidos",
   "encuesta_no_encontrada", "opcion_invalida", "encuesta_abierta", "evento_invalido",
+  "encuesta_convocada", "cambios_invalidos", "invitado_invalido", "nombres_repetidos",
 ]);
 
 export const VERSIONES = ["2025-11-25", "2025-06-18", "2025-03-26"] as const;
@@ -130,6 +134,30 @@ export const HERRAMIENTAS = [
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
+    name: "editar_encuesta",
+    title: "Editar encuesta",
+    description:
+      "Cambia una encuesta abierta o cerrada (no convocada) en una sola transacción: título, descripción, cierre, reabrir, añadir o quitar opciones y añadir, editar o quitar invitados. Quitar una opción o un invitado borra sus votos. Cada invitado nuevo necesita nombre o email; los nombres no se repiten. Los enlaces (común y personales) no cambian.",
+    inputSchema: {
+      type: "object", additionalProperties: false, required: ["id"],
+      properties: {
+        id: UUID,
+        titulo: { type: "string", minLength: 1, maxLength: LIMITES.titulo },
+        descripcion: { type: ["string", "null"], maxLength: LIMITES.descripcion },
+        cierre: ISO,
+        reabrir: { type: "boolean", description: "Si está cerrada, vuelve a abrirla (el cierre debe ser futuro)" },
+        opciones_nuevas: { type: "array", maxItems: LIMITES.opciones, items: { type: "object", additionalProperties: false, required: ["inicio", "fin"], properties: { inicio: ISO, fin: ISO } } },
+        opciones_quitar: { type: "array", maxItems: LIMITES.opciones, items: UUID },
+        invitados_nuevos: { type: "array", maxItems: LIMITES.invitados, items: { type: "object", additionalProperties: false, properties: {
+          nombre: { type: ["string", "null"], maxLength: LIMITES.nombre }, email: { type: ["string", "null"], maxLength: 254 } } } },
+        invitados_editar: { type: "array", maxItems: LIMITES.invitados, items: { type: "object", additionalProperties: false, required: ["id"], properties: {
+          id: UUID, nombre: { type: ["string", "null"], maxLength: LIMITES.nombre }, email: { type: ["string", "null"], maxLength: 254, description: "\"\" o null: sin email" } } } },
+        invitados_quitar: { type: "array", maxItems: LIMITES.invitados, items: UUID },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  },
+  {
     name: "borrar_encuesta",
     title: "Borrar encuesta",
     description:
@@ -179,6 +207,10 @@ async function ejecutar(nombre: string, args: unknown, datos: Datos): Promise<un
       const a = validarEnviados(args);
       const marcados = await datos.marcarEnviados(a.id, a.emails);
       return { id: a.id, marcados, no_encontrados: a.emails.filter((e) => !marcados.includes(e)) };
+    }
+    case "editar_encuesta": {
+      const { id, cambios } = validarEditar(args);
+      return { id, estado: await datos.editar(id, cambios) };
     }
     case "borrar_encuesta": {
       const { id } = validarId(args);
@@ -252,7 +284,7 @@ export async function manejarMcp(req: Request, datos: Datos): Promise<Response> 
       return ok({
         protocolVersion: version,
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "encuestas-jorcas-2027", title: "Encuestas de fecha · Jorcas 2027", version: "1.2.0" },
+        serverInfo: { name: "encuestas-jorcas-2027", title: "Encuestas de fecha · Jorcas 2027", version: "1.3.0" },
         instructions:
           "Administración de las encuestas de fecha de la Comisión de Fiestas de Jorcas 2027. Las fechas van en ISO 8601 con offset (hora de Madrid).",
       });
