@@ -559,6 +559,18 @@ a.btn-guardar:focus-visible {
   color: var(--acento);
 }
 
+.ya-votado {
+  background: color-mix(in srgb, var(--si) 10%, transparent);
+  border-left: 4px solid var(--si);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.pista {
+  font-size: 0.95rem;
+  margin: -4px 0 12px;
+}
+
 /* ---- Escritorio ---- */
 @media (min-width: 900px) {
   .contenedor {

@@ -89,6 +89,9 @@ export default async function EntradaComun({ params, searchParams }: PageProps<"
           ) : null}
 
           <h2 id="quien-titulo">{yaComo ? "¿No eres tú? Elige tu nombre" : "¿Quién eres?"}</h2>
+          {vista.nombres.some((n) => n.respondido) ? (
+            <p className="tenue pista">Si ya votaste y quieres cambiar tu voto, elige tu nombre: verás lo que marcaste y podrás corregirlo.</p>
+          ) : null}
           {vista.nombres.length > 0 ? (
             <form method="post" action={accion} className="lista-nombres">
               <input type="hidden" name="c" value={c} />

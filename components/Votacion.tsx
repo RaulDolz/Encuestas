@@ -35,6 +35,8 @@ export default function Votacion({ vista, enlaceCambiar }: { vista: VistaEncuest
   const pendientes = vista.opciones.length - respondidas;
 
   const hayCambios = vista.opciones.some((o) => seleccion[o.id] !== vista.misVotos[o.id]);
+  // Ya tiene algo guardado en la BD: se le dice que puede corregirlo.
+  const yaVotado = vista.opciones.some((o) => typeof vista.misVotos[o.id] === "boolean");
 
   function marcar(opcionId: string, valor: boolean) {
     if (!editable) return;
@@ -105,7 +107,14 @@ export default function Votacion({ vista, enlaceCambiar }: { vista: VistaEncuest
           ) : null}
         </section>
       ) : (
-        <p className="instrucciones">Marca en cada fecha si te va bien o no y pulsa «Guardar mi disponibilidad».</p>
+        yaVotado ? (
+          <p className="instrucciones ya-votado" role="status">
+            <strong>Ya has votado.</strong> Abajo está lo que marcaste. Si te equivocaste, cambia lo que quieras y pulsa
+            «Guardar cambios». Puedes corregirlo hasta el cierre.
+          </p>
+        ) : (
+          <p className="instrucciones">Marca en cada fecha si te va bien o no y pulsa «Guardar mi disponibilidad».</p>
+        )
       )}
 
       <ol className="tarjetas">
@@ -225,7 +234,9 @@ export default function Votacion({ vista, enlaceCambiar }: { vista: VistaEncuest
         <div className="barra-guardar">
           <div className="barra-estado" aria-live="polite">
             {estado.tipo === "ok" && !hayCambios ? (
-              <span className="ok">✓ Disponibilidad guardada a las {estado.hora}</span>
+              <span className="ok">
+                ✓ Guardado a las {estado.hora}. ¿Te has equivocado? Cambia lo que quieras y vuelve a guardar.
+              </span>
             ) : estado.tipo === "error" ? (
               <span className="err">{estado.texto}</span>
             ) : hayCambios ? (
@@ -237,19 +248,23 @@ export default function Votacion({ vista, enlaceCambiar }: { vista: VistaEncuest
                 {pendientes} {pendientes === 1 ? "fecha" : "fechas"} sin responder
               </span>
             ) : (
-              <span className="tenue">Puedes cambiar tu respuesta hasta el cierre.</span>
+              <span className="tenue">
+                {yaVotado ? "Tu respuesta está guardada. Para corregirla, cambia lo que quieras." : "Puedes cambiar tu respuesta hasta el cierre."}
+              </span>
             )}
           </div>
           <button
             type="button"
             className="btn-guardar"
             onClick={guardar}
-            disabled={estado.tipo === "guardando" || respondidas === 0}
+            disabled={estado.tipo === "guardando" || respondidas === 0 || (yaVotado && !hayCambios)}
           >
             {estado.tipo === "guardando" ? (
               <>
                 <span className="spinner" aria-hidden="true" /> Guardando…
               </>
+            ) : yaVotado ? (
+              "Guardar cambios"
             ) : (
               "Guardar mi disponibilidad"
             )}
