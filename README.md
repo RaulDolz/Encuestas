@@ -27,6 +27,7 @@ Sin librerías de UI: CSS propio en `app/globals.css`.
 | `SUPABASE_SERVICE_ROLE_KEY` | secret key `sb_secret_...` o service_role legacy (JWT) | Funcionan ambas. Nunca en el navegador. |
 
 | `ADMIN_API_KEY` | aleatoria, ≥ 32 bytes (≥ 43 caracteres base64url) | Solo Production. Clave de la página de autorización del conector MCP. Si falta o es corta, todo `/api/oauth/*` y `/api/mcp` quedan cerrados. Rotarla invalida todos los tokens emitidos. |
+| `CRON_SECRET` | aleatoria | Solo Production. Vercel la envía como `Authorization: Bearer …` a la tarea diaria `/api/latido`; sin ella la ruta responde 401. |
 | `PUBLIC_BASE_URL` | (opcional) | Por defecto `https://comisionjorcas2027.vercel.app`. Solo para desarrollo local. |
 
 No hay ninguna variable `NEXT_PUBLIC_*`. El cliente de Supabase vive en `lib/supabase.ts`
@@ -146,6 +147,14 @@ Sin email se guarda uno ficticio (`sin-email-<16 hex>@jorcas.invalid`) porque la
    (Vercel → proyecto `comision_jorcas_2027` → Settings → Environment Variables → `ADMIN_API_KEY`) → **Autorizar**.
 
 Para revocar todo: cambia ADMIN_API_KEY en Vercel y vuelve a desplegar.
+
+## Mantener despierta la base de datos
+
+Supabase (plan gratuito) pausa el proyecto tras ~7 días sin uso; entonces todo falla con
+`error_interno` hasta reactivarlo desde el panel de Supabase. Para evitarlo, `vercel.json` define
+una tarea programada de Vercel que llama cada día (06:17 UTC, la hora exacta puede variar dentro
+de esa hora en el plan Hobby) a `GET /api/latido`, que hace un `count` sobre `encuestas` sin
+devolver datos. Se ve en Vercel → proyecto → Settings → Cron Jobs.
 
 ## Seguridad
 
